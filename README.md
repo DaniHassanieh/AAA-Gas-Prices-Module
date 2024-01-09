@@ -1,4 +1,4 @@
-# AAA-Gas-Prices-Scrape
+# AAA-Gas-Prices-Module
 Discord bot module for News+Utility. Scrapes the AAA Gas prices website. Run with arguments in command line! <br>
 Uses Selenium and BeautifulSoup <br><br>
 
