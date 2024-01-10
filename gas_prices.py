@@ -88,10 +88,12 @@ for state in data["states"]:
     state["Metropolises"] = metro_data
 
 # check if output directory doesn't exist
-if not os.path.exists("./output/"):
-    os.makedirs("./output/")
+if not os.path.exists("./gas-prices-output/"):
+    os.makedirs("./gas-prices-output/")
 
 # write json file
-with open(f"./output/{date.today()}.json", "w") as outfile:
+with open(f"./gas-prices-output/gas-prices-{date.today()}.json", "w") as outfile:
     data_write = json.dumps(data, indent=4)
     outfile.write(data_write)
+
+driver.quit()
