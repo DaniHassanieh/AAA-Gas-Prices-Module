@@ -1,111 +1,97 @@
-import argparse
+import os
 import re
-from selenium import webdriver
-from selenium.webdriver.firefox.options import Options
 from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+import json
+from datetime import date
 
 
-def get_gas_prices(element, place):
-    data = ""
-    # go to first table
+def get_gas_prices(element):
+    place_data = {}
+    # get state gas price table
     table = element.find("table", {"class": "table-mob"})
-    # head row of table
-    head = table.find("thead").find("tr")
-    # first row with data
-    row = table.find("tbody").find("tr")
-    # head columns
-    col_headers = head.find_all("th")
-    # data columns
-    cols = row.find_all("td")
+    # get fuel type row of table
+    fuel_types = table.find("thead").find("tr").find_all("th")
+    # get table of gas prices
+    table_prices = table.find("tbody").find_all("tr")
 
-    # make output
-    for i in range(len(cols)):
-        if i != 0:
-            data += col_headers[i].text + ": "
-        data += cols[i].text
-        if i == 0:
-            data += f" in {place}"
-        data += "\n"
+    for i in range(len(fuel_types)):
+        # skip column of time descriptions
+        if fuel_types[i].text == "":
+            continue
 
-    return data
+        fuel = {}
+
+        for row_prices_element in table_prices:
+            # get row
+            row_prices = row_prices_element.find_all("td")
+            # get time
+            time = row_prices[0].text
+            # get gas price at that time
+            price = row_prices[i].text
+            # add average fuel price at time to category
+            fuel[time] = price
+
+        # add category to place data
+        place_data[fuel_types[i].text] = fuel
+
+    return place_data
 
 
-STATES = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DC", "DE", "FL", "GA",
-          "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
-          "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-          "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-          "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"]
+# create options and add arguments
+options = Options()
+options.add_argument("--headless")
+options.add_extension("./ublock.crx")
+# create webdriver
+driver = webdriver.Chrome(options=options)
 
-# gas price average taken from how long ago
-TIMES = ["current", "yesterday", "week", "month", "year"]
+url = "https://gasprices.aaa.com/?state="
 
-# parse command line arguments
-parser = argparse.ArgumentParser(description="Gas Prices.")
-parser.add_argument("--state", default="US", metavar="",
-                    help="State Abbreviation | Example Input: TX | (US is default with no flag)")
-group = parser.add_mutually_exclusive_group()
-group.add_argument("--metro", metavar="",
-                   help="Metro | Example Input: Dallas | Example Input: \"San Antonio\" | (Cannot be used if for US)")
-group.add_argument("--list", action="store_true", help="List metropolises in state. If US, then lists states")
-args = parser.parse_args()
+data = {
+    "date": f"{date.today()}"
+}
 
-# if state abbreviation does not exist, exit program. if states are being listed, list states and exit program
-if args.state not in STATES and args.state != "US":
-    exit("Incorrect. This program died and the blood is on your hands.")
-elif args.list and args.state == "US":
-    exit(STATES)
+with open("states.json") as f:
+    states = json.load(f)
+    data.update(states)
 
-# firefox options
-firefox_options = Options()
-firefox_options.add_argument("--headless")
+    country = data["country"]
+    # navigate to url
+    state_url = url + country["abbreviation"]
+    driver.get(state_url)
+    # get page source
+    soup = BeautifulSoup(driver.page_source, features="lxml")
+    # get gas prices
+    country["Average Gas Prices"] = get_gas_prices(soup)
 
-# webdriver instance created
-driver = webdriver.Firefox(options=firefox_options)
+for state in data["states"]:
+    # navigate to url
+    state_url = url + state["abbreviation"]
+    driver.get(state_url)
+    # get page source
+    soup = BeautifulSoup(driver.page_source, features="lxml")
+    # get gas prices
+    state["Average Gas Prices"] = get_gas_prices(soup)
 
-# navigate to url
-url = "https://gasprices.aaa.com/?state=" + args.state
-driver.get(url)
+    # get all metropolises
+    metros = soup.find_all("h3", {"id": re.compile(r"ui-id-")})
+    metro_data = {}
 
-# get page source
-source = driver.page_source
-
-# soup instance created
-soup = BeautifulSoup(source, features="lxml")
-
-output = ""
-
-if args.metro is None and not args.list:  # case that state or country gas prices are requested
-    output += get_gas_prices(soup, args.state)
-
-elif args.metro is None and args.list:  # case that list of metros is being requested
-    # make list of metros for state
-    pattern = re.compile(r"ui-id-")
-    results = soup.find_all("h3", {"id": pattern})
-    output += f"Metropolises in {args.state}:\n"
-    for metro in results:
-        output += metro.text + "\n"
-
-elif args.metro is not None:  # case that gas prices in metro is being requested
-    pattern = re.compile(r"ui-id-")
-    metros = soup.find_all("h3", {"id": pattern})
-    metro_found = False
     for metro in metros:
-        if metro.text == args.metro:
-            metro_found = True
-            new_id = metro.get("aria-controls")
-            metro_popout = soup.find("div", {"id": new_id})
-            output += get_gas_prices(metro_popout, args.metro)
-            break
-    if not metro_found:
-        driver.close()
-        exit(f"{args.metro} isn't a metro :c")
+        new_id = metro.get("aria-controls")
+        metro_popout = soup.find("div", {"id": new_id})
+        # get metro data
+        metro_data[metro.text] = get_gas_prices(metro_popout)
 
-# if last character newline, print without newline
-if output == "":
-    pass
-elif output[-1] == "\n":
-    print(output[0:-1])
-else:
-    print(output)
+    # add metro data
+    state["Metropolises"] = metro_data
 
-driver.close()
+# check if output directory doesn't exist
+if not os.path.exists("./output/"):
+    os.makedirs("./output/")
+
+# write json file
+with open(f"./output/{date.today()}.json", "w") as outfile:
+    data_write = json.dumps(data, indent=4)
+    outfile.write(data_write)
